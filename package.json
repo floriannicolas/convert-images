@@ -1,0 +1,19 @@
+{
+  "name": "convert-images",
+  "version": "1.0.0",
+  "description": "Convert images to webp, avif, jpeg, or png with compression",
+  "main": "convert-images.js",
+  "bin": {
+    "convert-images": "./convert-images.js"
+  },
+  "scripts": {
+    "start": "node convert-images.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
+}
