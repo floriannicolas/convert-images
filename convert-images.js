@@ -26,6 +26,7 @@ function parseArgs(args) {
     height: null,
     lossless: false,
     recursive: false,
+    trim: false,
     help: false
   };
 
@@ -52,6 +53,8 @@ function parseArgs(args) {
       options.lossless = true;
     } else if (arg === '-r' || arg === '--recursive') {
       options.recursive = true;
+    } else if (arg === '-t' || arg === '--trim') {
+      options.trim = true;
     } else if (arg.startsWith('--format=') || arg.startsWith('-f=')) {
       options.format = arg.split('=')[1].toLowerCase();
     } else if (arg === '-f' || arg === '--format') {
@@ -88,6 +91,7 @@ Options:
   -q, --quality=<num>     Quality 0-100 (default: 75, ignored if lossless)
   -w, --width=<px>        Resize width (maintains aspect ratio if height not set)
   -H, --height=<px>       Resize height (maintains aspect ratio if width not set)
+  -t, --trim              Trim transparent padding from edges
   -l, --lossless          Use lossless compression (default: lossy)
   -r, --recursive         Process subfolders recursively
   -h, --help              Show this help message
@@ -123,10 +127,15 @@ function getImageFiles(dir, recursive, baseDir = dir) {
   return images;
 }
 
-async function convertImage(inputPath, outputPath, { format, quality, lossless, width, height }) {
+async function convertImage(inputPath, outputPath, { format, quality, lossless, width, height, trim }) {
   try {
     const formatOptions = lossless ? { lossless: true } : { quality };
     let pipeline = sharp(inputPath);
+
+    // Trim transparent padding before resize
+    if (trim) {
+      pipeline = pipeline.trim();
+    }
 
     // Apply resize if width or height is specified
     if (width || height) {
@@ -200,8 +209,9 @@ async function main() {
   const resizeInfo = options.width || options.height
     ? `, resize: ${options.width || 'auto'}x${options.height || 'auto'}`
     : '';
+  const trimInfo = options.trim ? ', trimmed' : '';
   const recursiveInfo = options.recursive ? ', recursive' : '';
-  console.log(`Converting ${imageFiles.length} image(s) to ${options.format.toUpperCase()} (${modeInfo}${resizeInfo}${recursiveInfo})...\n`);
+  console.log(`Converting ${imageFiles.length} image(s) to ${options.format.toUpperCase()} (${modeInfo}${resizeInfo}${trimInfo}${recursiveInfo})...\n`);
 
   let successCount = 0;
   let failCount = 0;

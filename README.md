@@ -34,6 +34,7 @@ convert-images [options]
 | `--quality=<num>` | `-q` | Quality 0-100 (ignored if lossless) | `75` |
 | `--width=<px>` | `-w` | Resize width (aspect ratio maintained) | |
 | `--height=<px>` | `-H` | Resize height (aspect ratio maintained) | |
+| `--trim` | `-t` | Trim transparent padding from edges | `false` |
 | `--lossless` | `-l` | Use lossless compression | `false` |
 | `--recursive` | `-r` | Process subfolders | `false` |
 | `--help` | `-h` | Show help | |
@@ -77,6 +78,11 @@ node convert-images.js --width=400 -i=./photos -o=./thumbnails
 Resize to fit within 800x600:
 ```bash
 node convert-images.js -w=800 -H=600 -i=./photos -o=./resized
+```
+
+Trim transparent padding from logos:
+```bash
+node convert-images.js --trim -i=./logos -o=./trimmed
 ```
 
 All options combined:
