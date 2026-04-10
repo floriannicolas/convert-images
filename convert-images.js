@@ -27,6 +27,10 @@ function parseArgs(args) {
     lossless: false,
     recursive: false,
     trim: false,
+    fromUrls: null,
+    skipExisting: false,
+    concurrency: 5,
+    retries: 3,
     help: false
   };
 
@@ -67,6 +71,20 @@ function parseArgs(args) {
       options.height = parseInt(arg.split('=')[1]);
     } else if (arg === '-H' || arg === '--height') {
       options.height = parseInt(args[++i]);
+    } else if (arg === '--from-urls' || arg === '--urls-file') {
+      options.fromUrls = args[++i];
+    } else if (arg.startsWith('--from-urls=') || arg.startsWith('--urls-file=')) {
+      options.fromUrls = arg.split('=').slice(1).join('=');
+    } else if (arg === '--skip-existing') {
+      options.skipExisting = true;
+    } else if (arg === '--concurrency') {
+      options.concurrency = parseInt(args[++i]);
+    } else if (arg.startsWith('--concurrency=')) {
+      options.concurrency = parseInt(arg.split('=')[1]);
+    } else if (arg === '--retries') {
+      options.retries = parseInt(args[++i]);
+    } else if (arg.startsWith('--retries=')) {
+      options.retries = parseInt(arg.split('=')[1]);
     } else if (!arg.startsWith('-')) {
       positional.push(arg);
     }
@@ -96,12 +114,20 @@ Options:
   -r, --recursive         Process subfolders recursively
   -h, --help              Show this help message
 
+URL download options:
+  --from-urls=<file>      JSON file with URLs to download and convert
+                          Format: [{"url": "...", "name": "output-name"}, ...]
+  --skip-existing         Skip files that already exist in the output folder
+  --concurrency=<n>       Max parallel downloads (default: 5)
+  --retries=<n>           Retry failed downloads N times (default: 3)
+
 Examples:
   node convert-images.js
   node convert-images.js ./photos ./converted
   node convert-images.js -i=./photos -o=./converted -q=70
   node convert-images.js --recursive --format=avif -i=./photos -o=./converted
   node convert-images.js --width=800 -i=./photos -o=./thumbnails
+  node convert-images.js --from-urls urls.json -o ./output --format=webp -q=75
 `);
 }
 
@@ -166,6 +192,100 @@ async function convertImage(inputPath, outputPath, { format, quality, lossless, 
   }
 }
 
+async function downloadImage(url, destPath, retries) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, { redirect: 'follow' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(destPath, buffer);
+      return { success: true };
+    } catch (error) {
+      if (attempt < retries) {
+        console.log(`  ⟳ Retry ${attempt}/${retries - 1} for ${url}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+        return { success: false, error: error.message };
+      }
+    }
+  }
+}
+
+async function processUrls(options) {
+  const jsonContent = fs.readFileSync(options.fromUrls, 'utf-8');
+  let entries;
+  try {
+    entries = JSON.parse(jsonContent);
+  } catch {
+    console.error(`Failed to parse JSON file "${options.fromUrls}".`);
+    process.exit(1);
+  }
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    console.error('URL file must contain a non-empty JSON array.');
+    process.exit(1);
+  }
+
+  for (const entry of entries) {
+    if (!entry.url || !entry.name) {
+      console.error('Each entry must have "url" and "name" fields.');
+      process.exit(1);
+    }
+  }
+
+  if (!fs.existsSync(options.output)) {
+    fs.mkdirSync(options.output, { recursive: true });
+  }
+
+  const ext = options.format === 'jpeg' ? 'jpg' : options.format;
+  const manifest = { succeeded: [], failed: [] };
+
+  console.log(`Downloading and converting ${entries.length} image(s) to ${options.format.toUpperCase()} (concurrency: ${options.concurrency}, retries: ${options.retries})...\n`);
+
+  // Process in batches for concurrency control
+  for (let i = 0; i < entries.length; i += options.concurrency) {
+    const batch = entries.slice(i, i + options.concurrency);
+    const results = await Promise.all(batch.map(async (entry) => {
+      const outputFileName = `${entry.name}.${ext}`;
+      const outputPath = path.join(options.output, outputFileName);
+
+      if (options.skipExisting && fs.existsSync(outputPath)) {
+        console.log(`⊘ ${entry.name} — skipped (already exists)`);
+        manifest.succeeded.push(outputFileName);
+        return;
+      }
+
+      const tempPath = path.join(options.output, `.tmp-${entry.name}-${Date.now()}`);
+      const dlResult = await downloadImage(entry.url, tempPath, options.retries);
+
+      if (!dlResult.success) {
+        console.log(`✗ ${entry.name} — download failed: ${dlResult.error}`);
+        manifest.failed.push({ name: entry.name, error: dlResult.error });
+        return;
+      }
+
+      const success = await convertImage(tempPath, outputPath, options);
+
+      // Clean up temp file
+      try { fs.unlinkSync(tempPath); } catch {}
+
+      if (success) {
+        const outputStats = fs.statSync(outputPath);
+        console.log(`✓ ${entry.name} → ${outputFileName} (${formatBytes(outputStats.size)})`);
+        manifest.succeeded.push(outputFileName);
+      } else {
+        manifest.failed.push({ name: entry.name, error: 'conversion failed' });
+      }
+    }));
+  }
+
+  console.log(`\nDone! ${manifest.succeeded.length} succeeded, ${manifest.failed.length} failed.`);
+  console.log('\nManifest:');
+  console.log(JSON.stringify(manifest, null, 2));
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
@@ -184,6 +304,15 @@ async function main() {
   if (!SUPPORTED_FORMATS.includes(options.format)) {
     console.error(`Unsupported format "${options.format}". Supported: ${SUPPORTED_FORMATS.join(', ')}`);
     process.exit(1);
+  }
+
+  // URL download mode
+  if (options.fromUrls) {
+    if (!fs.existsSync(options.fromUrls)) {
+      console.error(`URL file "${options.fromUrls}" does not exist.`);
+      process.exit(1);
+    }
+    return processUrls(options);
   }
 
   // Check if input folder exists

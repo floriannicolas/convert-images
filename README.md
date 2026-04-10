@@ -39,6 +39,15 @@ convert-images [options]
 | `--recursive` | `-r` | Process subfolders | `false` |
 | `--help` | `-h` | Show help | |
 
+### URL Download Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--from-urls=<file>` | JSON file with URLs to download and convert | |
+| `--skip-existing` | Skip files that already exist in the output folder | `false` |
+| `--concurrency=<n>` | Max parallel downloads | `5` |
+| `--retries=<n>` | Retry failed downloads N times | `3` |
+
 ## Supported Input Formats
 
 JPG, JPEG, PNG, GIF, TIFF, BMP, AVIF, WebP
@@ -90,6 +99,31 @@ All options combined:
 node convert-images.js -r -f=avif -q=70 -i=./photos -o=./compressed
 ```
 
+### Download from URLs
+
+Create a JSON file with URLs and output names:
+```json
+[
+  {"url": "https://example.com/image1.jpg", "name": "image-1"},
+  {"url": "https://example.com/image2.jpg", "name": "image-2"}
+]
+```
+
+Download, convert, and optimize in one pass:
+```bash
+convert-images --from-urls urls.json -o ./output --format=webp --quality=75
+```
+
+Skip already downloaded files:
+```bash
+convert-images --from-urls urls.json -o ./output --format=webp --skip-existing
+```
+
+Control concurrency and retries:
+```bash
+convert-images --from-urls urls.json -o ./output --concurrency=10 --retries=5
+```
+
 ## Output
 
 The tool displays progress and compression stats:
@@ -104,6 +138,24 @@ Converting 7 image(s) to WEBP (lossy, quality: 75)...
 Done! 3 converted, 0 failed.
 
 Total: 5.20 MB → 1.85 MB (64.4% smaller)
+```
+
+When using `--from-urls`, a JSON manifest is printed at the end:
+
+```
+Downloading and converting 3 image(s) to WEBP (concurrency: 5, retries: 3)...
+
+✓ image-1 → image-1.webp (4.2 KB)
+✓ image-2 → image-2.webp (9.5 KB)
+✗ image-3 — download failed: HTTP 404 Not Found
+
+Done! 2 succeeded, 1 failed.
+
+Manifest:
+{
+  "succeeded": ["image-1.webp", "image-2.webp"],
+  "failed": [{"name": "image-3", "error": "HTTP 404 Not Found"}]
+}
 ```
 
 ## License
